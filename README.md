@@ -1,12 +1,12 @@
 
 #MCIntegrator
 
-Fortran module useful for computing numerical integrals with the Monte Carlo method.
-Included there are same basic tools for finding the average and stadard deviation of an array of data.
+Fortran modules for computing numerical integrals with the Monte Carlo method.
+Some basic tools for finding the average and stadard deviation of an array of data are included.
 
-In the folder `doc/` there is a user manual in pdf.
+In `doc/` there is a user manual in pdf.
 
-In teh folder `examples/` there are several examples.
+In `examples/` there are several examples.
 
 
 
