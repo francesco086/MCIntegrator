@@ -1,8 +1,8 @@
 #/bin/bash
 
 # Fortran compiler
-FF="gfortran"
+FF="gfortran-mp-5"
 
 # Optimization flags
-OPTFLAGS="-O3 -march=native"
+OPTFLAGS="-O3"
 

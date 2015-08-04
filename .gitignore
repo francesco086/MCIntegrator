@@ -65,4 +65,5 @@ src/*.mod
 debug/*.o
 debug/*.mod
 debug/exe
-
+examples/*/a.out
+examples/*/*.o
