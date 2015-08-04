@@ -16,8 +16,8 @@ PROGRAM ex1
 
    CALL imc%initialize(1)   !intialize a MCI object for a 1 dimensional integral
    CALL imc%setIRange((/-1.d0,3.d0/))  !integral domain is [-1,3]
-   CALL imc%setObservable(x3)
-   CALL imc%integrate(1000000_8,average,error)
+   CALL imc%setObservable(x3)   !set the function to be integrated
+   CALL imc%integrate(1000000_8,average,error)   !start the numerical computation of the integral
    
    PRINT *, 
    PRINT *, "Result with MCIntegrator:"
