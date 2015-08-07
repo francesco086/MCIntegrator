@@ -5,7 +5,7 @@ MODULE mcintegrator
    ! Initial MRT2 step, in case it is not set
    REAL(KIND=8), PRIVATE, PARAMETER :: INITIAL_STEP=0.1d0
 
-   ! Abstract interface for the sampling function
+   ! Abstract interface for the sampling and observable function
    ABSTRACT INTERFACE
       FUNCTION mcfunction(x)
          IMPLICIT NONE
@@ -23,7 +23,7 @@ MODULE mcintegrator
       REAL(KIND=8), PRIVATE :: targetaccrate=0.5d0   !target acceptance rate
       INTEGER(KIND=8), PRIVATE :: acc, rej   !accepted and rejected moves
       PROCEDURE(mcfunction), POINTER, NOPASS :: pdf   !the MC integration will be done sampling from this pdf
-      LOGICAL, PRIVATE :: flagnopdf
+      LOGICAL, PRIVATE :: flagnopdf   !did the user provide a pdf?
       REAL(KIND=8), PRIVATE :: pdfx   !value of the pdf function in x
       PROCEDURE(mcfunction), POINTER, NOPASS :: obs   !the MC integration will be done accumulating this observable
       REAL(KIND=8), PRIVATE :: obsx   !value of the obs function in x
@@ -33,18 +33,24 @@ MODULE mcintegrator
 
    CONTAINS
 
+      !!! BUILDER AND DESTROYER
       PROCEDURE :: initialize, terminate
 
+      !!! SETTERS
       PROCEDURE :: setIRange, setX, setMRT2Step, setTargetAcceptanceRate
       PROCEDURE :: setSamplingFunction, setObservable
 
+      !!! GETTERS
       PROCEDURE :: getNDim
       PROCEDURE :: getIRange, getX, getMRT2Step, getTargetAcceptanceRate
-
-      PROCEDURE :: integrate
       PROCEDURE :: getAcceptanceRate
-      PROCEDURE :: findMRT2Step
-      PROCEDURE :: initialDecorrelation
+
+      !!! INTEGRATION SUBROUTINE
+      PROCEDURE :: integrate
+      
+      !!! PRIVATE SUBROUTINES, USED INTERNALLY
+      PROCEDURE, PRIVATE :: findMRT2Step
+      PROCEDURE, PRIVATE :: initialDecorrelation
       PROCEDURE, PRIVATE :: doStepMRT2
       PROCEDURE, PRIVATE :: applyPBC
       PROCEDURE, PRIVATE :: computeNewObservable, confirmOldObservable
@@ -56,6 +62,212 @@ MODULE mcintegrator
 
 CONTAINS
 
+
+
+   !!!!!!!!! BUILDER AND DESTROYER !!!!!!!!!!!!!
+
+      SUBROUTINE initialize(this,ndim)
+         IMPLICIT NONE
+         CLASS(MCI) :: this
+         INTEGER, INTENT(IN) :: ndim
+         INTEGER :: i1
+
+         IF (this%flaginit) STOP "MCI error: Cannot initialize already initialized object."
+
+         ! ndim
+         this%ndim=ndim
+         ! irange
+         ALLOCATE(this%irange(1:2,1:this%ndim))
+         DO i1 = 1, this%ndim, 1
+            this%irange(1,i1)=-HUGE(0.d0) ; this%irange(2,i1)=HUGE(0.d0)
+         END DO
+         ! vol
+         this%vol=1.d0
+         DO i1 = 1, this%ndim, 1
+            this%vol=this%vol*(this%irange(2,i1)-this%irange(1,i1))
+         END DO
+         ! x
+         ALLOCATE(this%x(1:this%ndim))
+         this%x=0.d0
+         ! mrt2step
+         ALLOCATE(this%mrt2step(1:this%ndim))
+         this%mrt2step=INITIAL_STEP
+         ! pdf
+         this%flagnopdf=.TRUE.
+
+         this%flaginit=.TRUE.
+      
+      END SUBROUTINE initialize
+
+
+      SUBROUTINE terminate(this)
+         IMPLICIT NONE
+         CLASS(MCI) :: this
+      
+         IF (.NOT. this%flaginit) STOP "MCI error: Cannot terminate a not initialized object."
+         DEALLOCATE(this%irange)
+         DEALLOCATE(this%x)
+         DEALLOCATE(this%mrt2step)
+         this%flaginit=.FALSE.
+         IF (ALLOCATED(this%datax)) DEALLOCATE(this%datax)
+      
+      END SUBROUTINE terminate
+      
+      
+      
+!!!!!!!!! SETTERS !!!!!!!!!!!!!
+
+   SUBROUTINE setIRange(this,irange)
+      IMPLICIT NONE
+      CLASS(MCI) :: this
+      REAL(KIND=8), INTENT(IN) :: irange(1:2,1:this%ndim)
+      INTEGER :: i1
+   
+      this%irange=irange
+      !set accordingly the initial x
+      DO i1 = 1, this%ndim, 1
+         this%x(i1)=(irange(2,i1)+irange(1,i1))*0.5d0
+      END DO
+      !set accordinly the mrt2step
+      this%mrt2step(1:this%ndim)=0.5d0*(this%irange(2,1:this%ndim)-this%irange(1,1:this%ndim))
+      !set accordingly the integration volume
+      this%vol=1.d0
+      DO i1 = 1, this%ndim, 1
+         this%vol=this%vol*(this%irange(2,i1)-this%irange(1,i1))
+      END DO
+   
+   END SUBROUTINE setIRange
+
+
+   SUBROUTINE setX(this,x0)
+      IMPLICIT NONE
+      CLASS(MCI) :: this
+      REAL(KIND=8), INTENT(IN) :: x0(1:this%ndim)
+
+      this%x=x0
+      CALL this%applyPBC()
+
+   END SUBROUTINE setX
+
+
+   SUBROUTINE setMRT2Step(this,step)
+      IMPLICIT NONE
+      CLASS(MCI) :: this
+      REAL(KIND=8), INTENT(IN) :: step(1:this%ndim)
+
+      this%mrt2step=step
+
+   END SUBROUTINE setMRT2Step
+
+
+   SUBROUTINE setTargetAcceptanceRate(this,targetaccrate)
+      IMPLICIT NONE
+      CLASS(MCI) :: this
+      REAL(KIND=8), INTENT(IN) :: targetaccrate
+
+      this%targetaccrate=targetaccrate
+
+   END SUBROUTINE setTargetAcceptanceRate
+
+   SUBROUTINE setObservable(this,observable)
+      IMPLICIT NONE
+      CLASS(MCI) :: this
+      INTERFACE
+         FUNCTION observable(x)
+            IMPLICIT NONE
+            REAL(KIND=8) :: observable
+            REAL(KIND=8), INTENT(IN) :: x(:)
+         END FUNCTION observable
+      END INTERFACE
+
+      this%obs=>observable
+
+   END SUBROUTINE setObservable
+
+
+   SUBROUTINE setSamplingFunction(this,sampling_function)
+      IMPLICIT NONE
+      CLASS(MCI) :: this
+      INTERFACE
+         FUNCTION sampling_function(x)
+            IMPLICIT NONE
+            REAL(KIND=8) :: sampling_function
+            REAL(KIND=8), INTENT(IN) :: x(:)
+         END FUNCTION sampling_function
+      END INTERFACE
+
+      this%pdf=>sampling_function
+      this%flagnopdf=.FALSE.
+
+   END SUBROUTINE setSamplingFunction
+
+
+
+!!!!!!!!! GETTERS !!!!!!!!!!!!!
+
+   FUNCTION getNDim(this)
+      IMPLICIT NONE
+      CLASS(MCI) :: this
+      INTEGER :: getNDim
+   
+      getNDim=this%ndim
+   
+   END FUNCTION getNDim
+   
+   
+   FUNCTION getIRange(this)
+      IMPLICIT NONE
+      CLASS(MCI) :: this
+      REAL(KIND=8) :: getIRange(1:2,1:this%ndim)
+
+      getIRange=this%irange
+
+   END FUNCTION getIRange
+   
+   
+   FUNCTION getX(this)
+      IMPLICIT NONE
+      CLASS(MCI) :: this
+      REAL(KIND=8) :: getX(1:this%ndim)
+
+      getX=this%x
+
+   END FUNCTION getX
+   
+   
+   FUNCTION getMRT2Step(this)
+      IMPLICIT NONE
+      CLASS(MCI) :: this
+      REAL(KIND=8) :: getMRT2Step(1:this%ndim)
+
+      getMRT2Step=this%mrt2step
+
+   END FUNCTION getMRT2Step
+   
+   
+   FUNCTION getTargetAcceptanceRate(this)
+      IMPLICIT NONE
+      CLASS(MCI) :: this
+      REAL(KIND=8) :: getTargetAcceptanceRate
+
+      getTargetAcceptanceRate=this%targetaccrate
+
+   END FUNCTION getTargetAcceptanceRate
+
+
+   FUNCTION getAcceptanceRate(this)
+      IMPLICIT NONE
+      CLASS(MCI) :: this
+      REAL(KIND=8) :: getAcceptanceRate
+
+      getAcceptanceRate=REAL(this%acc,8)/REAL(this%acc+this%rej,8)
+   
+   END FUNCTION getAcceptanceRate
+
+
+
+!!!!!!!!! INTEGRATION SUBROUTINE !!!!!!!!!!!!!
+
    SUBROUTINE integrate(this,nmc,average,error)
       IMPLICIT NONE
       CLASS(MCI) :: this
@@ -64,11 +276,12 @@ CONTAINS
       INTEGER :: i1
       REAL(KIND=8) :: foo(1:2)
 
-      ! Find the optimal MRT2 step
-      CALL this%findMRT2Step()
-
-      ! Initial decorrelation
-      CALL this%initialDecorrelation()
+      IF (.NOT. this%flagnopdf) THEN
+         ! Find the optimal MRT2 step
+         CALL this%findMRT2Step()
+         ! Initial decorrelation
+         CALL this%initialDecorrelation()
+      END IF
 
       ! Allocation of the data array
       ALLOCATE(this%datax(1:nmc))
@@ -85,6 +298,9 @@ CONTAINS
 
    END SUBROUTINE integrate
 
+
+
+!!!!!!!!! PRIVATE SUBROUTINE, USED INTERNALLY !!!!!!!!!!!!!
 
    SUBROUTINE initialDecorrelation(this)
       IMPLICIT NONE
@@ -148,10 +364,10 @@ CONTAINS
    SUBROUTINE findMRT2Step(this)
       IMPLICIT NONE
       CLASS(MCI) :: this
-      INTEGER(KIND=8), PARAMETER :: MIN_STAT=200
-      INTEGER(KIND=8), PARAMETER :: MIN_CONS=20
+      INTEGER(KIND=8), PARAMETER :: MIN_STAT=100
+      INTEGER(KIND=8), PARAMETER :: MIN_CONS=10
       REAL(KIND=8), PARAMETER :: TOLERANCE=0.05d0
-      INTEGER(KIND=8), PARAMETER :: MAX_NUM_ATTEMPTS=10
+      INTEGER(KIND=8), PARAMETER :: MAX_NUM_ATTEMPTS=100
       INTEGER(KIND=8) :: i1, i2, counter
       REAL(KIND=8) :: rate
       
@@ -168,7 +384,7 @@ CONTAINS
          DO i2 = 1, MIN_STAT, 1
             CALL this%doStepMRT2()
          END DO
-         CALL this%getAcceptanceRate(rate)
+         rate=this%getAcceptanceRate()
          IF (rate>this%targetaccrate+TOLERANCE) THEN
             ! acceptance too high, step too small
             i1=0
@@ -258,16 +474,6 @@ CONTAINS
    END SUBROUTINE applyPBC
 
 
-   SUBROUTINE getAcceptanceRate(this,rate)
-      IMPLICIT NONE
-      CLASS(MCI) :: this
-      REAL(KIND=8), INTENT(OUT) :: rate
-
-      rate=REAL(this%acc,8)/REAL(this%acc+this%rej,8)
-      
-   END SUBROUTINE getAcceptanceRate
-
-
    SUBROUTINE resetAccRejCounters(this)
       IMPLICIT NONE
       CLASS(MCI) :: this
@@ -301,190 +507,18 @@ CONTAINS
       this%ridx=this%ridx+1
       
    END SUBROUTINE confirmOldObservable
-
-
-   !!!!!!!!  SET PROPERTIES OF THE MC INTEGRATION  !!!!!!!!
-
-
-   SUBROUTINE setObservable(this,observable)
-      IMPLICIT NONE
-      CLASS(MCI) :: this
-      INTERFACE
-         FUNCTION observable(x)
-            IMPLICIT NONE
-            REAL(KIND=8) :: observable
-            REAL(KIND=8), INTENT(IN) :: x(:)
-         END FUNCTION observable
-      END INTERFACE
-
-      this%obs=>observable
-      
-   END SUBROUTINE setObservable
-
-
-   SUBROUTINE setSamplingFunction(this,sampling_function)
-      IMPLICIT NONE
-      CLASS(MCI) :: this
-      INTERFACE
-         FUNCTION sampling_function(x)
-            IMPLICIT NONE
-            REAL(KIND=8) :: sampling_function
-            REAL(KIND=8), INTENT(IN) :: x(:)
-         END FUNCTION sampling_function
-      END INTERFACE
-
-      this%pdf=>sampling_function
-      this%flagnopdf=.FALSE.
-      
-   END SUBROUTINE setSamplingFunction
-
-
-   SUBROUTINE setIRange(this,irange)
-      IMPLICIT NONE
-      CLASS(MCI) :: this
-      REAL(KIND=8), INTENT(IN) :: irange(1:2,1:this%ndim)
-      INTEGER :: i1
-
-      this%irange=irange
-      DO i1 = 1, this%ndim, 1
-         this%x(i1)=(irange(2,i1)+irange(1,i1))*0.5d0
-      END DO
-
-      this%vol=1.d0
-      DO i1 = 1, this%ndim, 1
-         this%vol=this%vol*(this%irange(2,i1)-this%irange(1,i1))
-      END DO
-      
-   END SUBROUTINE setIRange
-
-
-   SUBROUTINE setX(this,x0)
-      IMPLICIT NONE
-      CLASS(MCI) :: this
-      REAL(KIND=8), INTENT(IN) :: x0(1:this%ndim)
-
-      this%x=x0
-      CALL this%applyPBC()
-      
-   END SUBROUTINE setX
-
-
-   SUBROUTINE setMRT2Step(this,step)
-      IMPLICIT NONE
-      CLASS(MCI) :: this
-      REAL(KIND=8), INTENT(IN) :: step(1:this%ndim)
-
-      this%mrt2step=step
-      
-   END SUBROUTINE setMRT2Step
-
-
-   SUBROUTINE setTargetAcceptanceRate(this,targetaccrate)
-      IMPLICIT NONE
-      CLASS(MCI) :: this
-      REAL(KIND=8), INTENT(IN) :: targetaccrate
-
-      this%targetaccrate=targetaccrate
-      
-   END SUBROUTINE setTargetAcceptanceRate
-
-
-   FUNCTION getTargetAcceptanceRate(this)
-      IMPLICIT NONE
-      CLASS(MCI) :: this
-      REAL(KIND=8) :: getTargetAcceptanceRate
-
-      getTargetAcceptanceRate=this%targetaccrate
    
-   END FUNCTION getTargetAcceptanceRate
-
-
-   FUNCTION getMRT2Step(this)
-      IMPLICIT NONE
-      CLASS(MCI) :: this
-      REAL(KIND=8) :: getMRT2Step(1:this%ndim)
-
-      getMRT2Step=this%mrt2step
    
-   END FUNCTION getMRT2Step
 
 
-   FUNCTION getX(this)
-      IMPLICIT NONE
-      CLASS(MCI) :: this
-      REAL(KIND=8) :: getX(1:this%ndim)
-
-      getX=this%x
-   
-   END FUNCTION getX
 
 
-   FUNCTION getNDim(this)
-      IMPLICIT NONE
-      CLASS(MCI) :: this
-      INTEGER :: getNDim
-   
-      getNDim=this%ndim
-   
-   END FUNCTION getNDim
 
 
-   FUNCTION getIRange(this)
-      IMPLICIT NONE
-      CLASS(MCI) :: this
-      REAL(KIND=8) :: getIRange(1:2,1:this%ndim)
-
-      getIRange=this%irange
-   
-   END FUNCTION getIRange
 
 
-   SUBROUTINE initialize(this,ndim)
-      IMPLICIT NONE
-      CLASS(MCI) :: this
-      INTEGER, INTENT(IN) :: ndim
-      INTEGER :: i1
-
-      IF (this%flaginit) STOP "MCI error: Cannot initialize already initialized object."
-
-      ! ndim
-      this%ndim=ndim
-      ! irange
-      ALLOCATE(this%irange(1:2,1:this%ndim))
-      DO i1 = 1, this%ndim, 1
-         this%irange(1,i1)=-HUGE(0.d0) ; this%irange(2,i1)=HUGE(0.d0)
-      END DO
-      ! vol
-      this%vol=1.d0
-      DO i1 = 1, this%ndim, 1
-         this%vol=this%vol*(this%irange(2,i1)-this%irange(1,i1))
-      END DO
-      ! x
-      ALLOCATE(this%x(1:this%ndim))
-      this%x=0.d0
-      ! mrt2step
-      ALLOCATE(this%mrt2step(1:this%ndim))
-      this%mrt2step=INITIAL_STEP
-      ! pdf
-      this%flagnopdf=.TRUE.
-
-      this%flaginit=.TRUE.
-      
-   END SUBROUTINE initialize
 
 
-   SUBROUTINE terminate(this)
-      IMPLICIT NONE
-      CLASS(MCI) :: this
-      
-      IF (.NOT. this%flaginit) STOP "MCI error: Cannot terminate a not initialized object."
-      DEALLOCATE(this%irange)
-      DEALLOCATE(this%x)
-      DEALLOCATE(this%mrt2step)
-      this%flaginit=.FALSE.
-      IF (ALLOCATED(this%datax)) DEALLOCATE(this%datax)
-      
-   END SUBROUTINE terminate
 
 	
 END MODULE mcintegrator

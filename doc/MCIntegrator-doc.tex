@@ -1,0 +1,244 @@
+\documentclass[11pt,a4paper,twoside]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[english]{babel}
+\usepackage{graphicx}
+\usepackage{latexsym,amsmath,amssymb,amsthm}
+\usepackage{makeidx}
+\usepackage[usenames,dvipsnames]{color}
+\usepackage[unicode=true,colorlinks=true,linkcolor=RoyalBlue,citecolor=RoyalBlue]{hyperref}
+\usepackage{natbib}
+\usepackage{lipsum}
+
+\title{The MCIntegrator Fortran Module}
+\author{Francesco Calcavecchia}
+
+\makeindex
+
+\newcommand{\MRTWO}{$ \text{M}(\text{RT})^2 \;$}
+
+
+\begin{document}
+\maketitle
+
+The \verb+MCIntegrator+ Fortran module contains simple tools for computing numerical integrals in \verb+NDIM+ dimensions with the Monte Carlo technique, exploiting the \MRTWO algorithm for sampling from the provided sampling function.
+Included, there is a module called \verb+estimators+, which can be used to estimate the mean and standard deviation of a set of uncorrelated or correlated data.
+
+More specifically the integration is performed by sampling coordinates \verb+X+ from a given probability density function \verb+g(X)+, and summing up an \emph{observable} \verb+f(X)+:
+\begin{equation}
+   \int d\verb+X+ \, \verb+f(X)+ = \sum_{\verb+X+_i \text{ sampled from } \verb+g(X)+} \verb+f(X+_i\verb+)+
+\end{equation}
+
+Both modules do not have any dependence.
+
+
+
+\section{Declaration of the module}
+First of all one has to declare the \verb+MCIntegrator+ module, using the instruction
+\begin{verbatim}
+   USE mcintegrator
+\end{verbatim}
+which has to be inserted just before the \verb+IMPLICIT NONE+ command in any \verb+PROGRAM+, \verb+SUBROUTINE+, \verb+FUNCTION+, or \verb+MODULE+.
+
+
+
+\section{Integrator's declaration}
+In the following we will use the variable name \verb+imc+ for labeling a \verb+MCIntegrator+ object.
+An integrator \verb+imc+ must be declared as
+\begin{verbatim}
+   TYPE(MCI) :: imc
+\end{verbatim}
+
+
+
+\section{Integrator's initialization}
+\label{sec:initialization}
+The first step is to initialize the integrator, specifying the number of dimensions \verb+NDIM+
+\begin{verbatim}
+   CALL imc%initialize(NDIM= )
+\end{verbatim}
+\verb+NDIM+ is of type \verb+INTEGER(KIND=4)+.
+
+The second mandatory step is to specify the observable:
+\begin{verbatim}
+   CALL imc%setObservable(OBSERVABLE= )
+\end{verbatim}
+The argument requested is a function (with an explicit interface) that should respect the following interface:
+\begin{verbatim}
+   FUNCTION observable(x)
+      IMPLICIT NONE
+      REAL(KIND=8) :: observable
+      REAL(KIND=8), INTENT(IN) :: x(:)
+   END FUNCTION observable
+\end{verbatim}
+
+
+
+\section{Optional settings}
+The following settings are said to be optional because there is a default value, but they actually could be essential for your calculation.
+
+\subsection{Integral domain} % (fold)
+\label{sub:integral_domain}
+\begin{verbatim}
+   CALL imc%setIRange(IRANGE= )
+\end{verbatim}
+The argument \verb+IRANGE+ is an array of type \verb+REAL(KIND=8)+ with shape \verb+(1:2,1:NDIM)+. For example, in the one-dimensional case, to integrate between \verb+La+ and \verb+Lb+, one has to set \verb+IRANGE(1,1)=La+ and \verb+IRANGE(2,1)=Lb+. It is assumed that $\verb+La+ < \verb+Lb+$.
+
+When the integral domain is set, the initial coordinates and the \MRTWO step are set accordingly.
+Specifically, the coordinates are set to be in the middle of the integration volume, whereas the step is set to be half of the integration sides for each direction.
+% subsection integral_domain (end)
+
+\subsection{Initial coordinates} % (fold)
+\label{sub:starting_coordinates}
+As the reader should now, the Markov chain is built starting from an initial point.
+By default this is assumed to be in the middle of the integration space, however it might be convenient to set it manually in certain specific situations.
+This can be done with the command
+\begin{verbatim}
+   CALL imc%setX(X0= )
+\end{verbatim}
+where \verb+X0+ is an array of type \verb+REAL(KIND=8)+ with shape \verb+(1:NDIM)+.
+% subsection starting_coordinates (end)
+
+\subsection{\MRTWO step} % (fold)
+\label{sub:mrt2_step}
+The initial \MRTWO step is set equal to $0.1$ by default for every direction.
+
+If the user does not provide a sampling function, it is important that he/she provides a reasonable step.
+
+However, if a sampling function has been provided, it is not essential to provide this parameter, because before proceeding with the integration, \verb+MCIntegrator+ adjust the step in order to obtain an acceptance close to the target one (by default $50\%$, see subsection \ref{sub:acceptance_rate}).
+In any case, setting by hand a reasonable value can result in a tuning speed-up.
+
+Use
+\begin{verbatim}
+   CALL imc%setMRT2Step(STEP= )
+\end{verbatim}
+where \verb+STEP+ is of type \verb+REAL(KIND=8)+ and must have shape \verb+(1:NDIM)+.
+% subsection mrt2_step (end)
+
+\subsection{Acceptance rate} % (fold)
+\label{sub:acceptance_rate}
+In the context of the \MRTWO algorithm, the acceptance rate is one of the most important parameters to control.
+Before proceeding with the integration, \verb+MCIntegrator+ automatically adjust the \MRTWO step in order to obtain an acceptance rate close to the provided target one (by default $50\%$).
+A target acceptance rate of $50\%$ provides very good performance in almost all cases.
+We remark that if the user does not specify a sampling function, the acceptance rate will always be $100\%$, independently of the \MRTWO step.
+
+For setting the target acceptance rate use
+\begin{verbatim}
+   CALL imc%setTargetAcceptanceRate(TARGETACCRATE= )
+\end{verbatim}
+where \verb+TARGETACCRATE+ is a \verb+REAL(KIND=8)+.
+% subsection acceptance_rate (end)
+
+\subsection{Sampling function} % (fold)
+\label{sub:sampling_function}
+Whenever it is possible, it is convenient to sample from a probability density function as similar as possible to the observable function.
+We remark that one of the properties of a probability density function is the normalization.
+the user is responsible for providing a correct sampling function.
+
+To set a sampling function, use
+\begin{verbatim}
+   CALL imc%setSamplingFunction(SAMPLING_FUNCTION= )
+\end{verbatim}
+where \verb+SAMPLING_FUNCTION+ must fulfill the same interface as the observable (see Section \ref{sec:initialization}).
+% subsection sampling_function (end)
+
+
+
+\section{Integration} % (fold)
+\label{sec:integration}
+Once that all the settings are done, one can obtain the result by invoking
+\begin{verbatim}
+   CALL imc%integrate(NMC= , AVERAGE= , ERROR= )
+\end{verbatim}
+where \verb+NMC+ is a \verb+INTEGER(KIND=8)+ and must be provided as input, whereas \verb+AVERAGE+ and \verb+ERROR+ are of type \verb+REAL(KIND=8)+ and are provided as output.
+\verb+NMC+ is the number of sampled points: The larger its value, the more accurate will be the result, according to the well known $1/\sqrt{\verb+NMC+}$ rule.
+\verb+AVERAGE+ will contain the resulting numeric estimation of the integral with an estimated standard deviation equal to \verb+ERROR+.
+
+% section integration (end)
+
+
+
+\section{Getting additional information} % (fold)
+\label{sec:getting_additional_information}
+It is possible to obtain some additional information about the integration.
+
+\subsection{Dimensionality} % (fold)
+\label{sub:dimensionality}
+It is possible to get the number of dimensions with
+\begin{verbatim}
+   imc%getNDim()
+\end{verbatim}
+% subsection dimensionality (end)
+
+\subsection{Integral domain} % (fold)
+\label{sub:integral_domain2}
+The \verb+IRANGE+ described in subsection \ref{sub:integral_domain} can be obtained back by calling
+\begin{verbatim}
+   imc%getIRange()
+\end{verbatim}
+% subsection integral_domain2 (end)
+
+\subsection{Coordinates} % (fold)
+\label{sub:coordinates}
+The actual coordinates can be obtained by
+\begin{verbatim}
+   imc%getX()
+\end{verbatim}
+Before the integration this call will give back the initial coordinates, while after an integration this function will provide their last value.
+% subsection coordinates (end)
+
+\subsection{\MRTWO step} % (fold)
+\label{sub:_mrtwo_step}
+One can in any moment access to the value of the \MRTWO step using
+\begin{verbatim}
+   imc%getMRT2Step()
+\end{verbatim}
+If a sampling function is provided, after an integration, its value will be changed automatically in order to obtain the an acceptance rate as close as possible to the target.
+% subsection _mrtwo_step (end)
+
+\subsection{Acceptance rate} % (fold)
+\label{sub:acceptance_rate}
+The target acceptance rate can be checked by calling
+\begin{verbatim}
+   imc%getTargetAcceptanceRate()
+\end{verbatim}
+
+The actual acceptance rate resulting from an integration is obtainable with
+\begin{verbatim}
+   imc%getAcceptanceRate()
+\end{verbatim}
+% subsection acceptance_rate (end)
+
+% section getting_additional_information (end)
+
+
+\section{Free the memory} % (fold)
+\label{sec:free_the_memory}
+After computing the integral, one can free the allocated memory embedded with the \verb+MCIntegrator+ by using the instruction
+\begin{verbatim}
+   CALL imc%terminate()
+\end{verbatim}
+% section free_the_memory (end)
+
+
+
+\section{Estimation of the average and its standard deviation} % (fold)
+\label{sec:mean_estimation_and_standard_deviation}
+Given an array of \verb+REAL(KIND=8)+, one can use the module \verb+estimators+ to extract its average value and standard deviation.
+To do so one has to first declare the module
+\begin{verbatim}
+   USE estimators
+\end{verbatim}
+and then use one of the three available functions:
+\begin{itemize}
+   \item \verb+uncorrelated_estimator(N= , X= )+ \\ where \verb+N+ is an \verb+INTEGER(KIND=8)+, and \verb+X+ an array of \verb+REAL(KIND=8)+ of size \verb+N+. The function will return an array of \verb+REAL(KIND=8)+ with size $2$, where the first element will be the average value, and the second one will be the standard deviation. This function can be used when data are not correlated;
+   \item \verb+uncorrelated_estimator(N= , X= )+ \\ input and output are structures as in the previous function, but in this case data are considered to be correlated, and the blocking technique is used to correctly estimate the standard deviation;
+   \item \verb+block_estimator(N= , X= , NBLOCKS= )+ \\ where \verb+NBLOCKS+ is an \verb+INTEGER(KIND=4)+. This function computes average and standard deviation dividing the data into \verb+NBLOCKS+ blocks and computing their average, and then use this new data to compute their standard deviation as if they were uncorrelated.
+\end{itemize}
+% section mean_estimation_and_standard_deviation (end)
+
+
+\printindex
+
+\end{document}

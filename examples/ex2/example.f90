@@ -52,5 +52,7 @@ PROGRAM ex2
    CALL imc2%integrate(1000000_8,average2,error2)   !integrate by sampling 1000000 points
    PRINT*, "   Result is: ", average2, " +- ", error2
    
+   CALL imc1%terminate()
+   CALL imc2%terminate()
 
 END PROGRAM ex2

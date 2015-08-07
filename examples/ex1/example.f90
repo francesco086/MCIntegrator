@@ -23,6 +23,8 @@ PROGRAM ex1
    PRINT *, "Result with MCIntegrator:"
    PRINT *, "  ", average, " +- ", error
 
+   CALL imc%terminate()  !free the memory stored by imc
+
 END PROGRAM ex1
 
 

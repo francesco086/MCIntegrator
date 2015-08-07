@@ -1,11 +1,3 @@
-! Set of functions for estimating the average and error of a set of
-! data, correlated or uncorrelated.
-! If data are uncorrelated the clocking technique with the plateau
-! criterium is used.
-! All functions return a 2-dimensional array, the first value is the
-! average and the second the standard deviation
-
-
 MODULE estimators
    IMPLICIT NONE
 

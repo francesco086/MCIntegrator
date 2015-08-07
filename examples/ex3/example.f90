@@ -58,6 +58,8 @@ PROGRAM ex3
       PRINT*, "Efficiency =      ", (1.d0/(error(i)*error(i)*(time1-time0)))/eff_0
       PRINT*, 
    END DO
+
+   CALL imc%terminate()
    
 END PROGRAM ex3
 
