@@ -60,11 +60,22 @@ DerivedData
 
 # -- project specific ignores --
 lib*
+
 src/*.o
 src/*.mod
+
 debug/*.o
 debug/*.mod
 debug/exe
+
 examples/*/a.out
 examples/*/*.o
 examples/*/*.mod
+
+doc/*.aux
+doc/*.dvi
+doc/*.idx
+doc/*.log
+doc/*.out
+doc/*.ps
+doc/*.gz
