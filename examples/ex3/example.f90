@@ -49,7 +49,7 @@ PROGRAM ex3
       CALL CPU_TIME(time0)
       CALL imc%integrate(10000000_8,average(i),error(i))   !start the numerical computation of the integral
       CALL CPU_TIME(time1)
-      CALL imc%getAcceptanceRate(acc_rate)
+      acc_rate=imc%getAcceptanceRate()
       mrt2_step=imc%getMRT2Step()
       PRINT*, "Acceptance Rate = ", acc_rate
       PRINT*, "MRT2 Step       = ", mrt2_step
