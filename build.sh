@@ -5,7 +5,7 @@ LIBNAME="mcintegrator"
 
 \rm -f *.a
 cd src
-   \rm -f *.o *.a
+   \rm -f *.o *.a *.mod
    $FF $OPTFLAGS -c *.f90
    ar rcv lib${LIBNAME}.a *.o
    ranlib lib${LIBNAME}.a

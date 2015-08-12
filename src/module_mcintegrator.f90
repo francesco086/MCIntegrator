@@ -51,7 +51,7 @@ MODULE mcintegrator
       !!! PRIVATE SUBROUTINES, USED INTERNALLY
       PROCEDURE, PRIVATE :: findMRT2Step
       PROCEDURE, PRIVATE :: initialDecorrelation
-      PROCEDURE, PRIVATE :: doStepMRT2
+      PROCEDURE, PRIVATE :: newX, doStepMRT2
       PROCEDURE, PRIVATE :: applyPBC
       PROCEDURE, PRIVATE :: computeNewObservable, confirmOldObservable
       PROCEDURE, PRIVATE :: resetAccRejCounters
@@ -290,7 +290,11 @@ CONTAINS
       CALL this%sample(nmc,.TRUE.)
 
       ! Estimation of the integral
-      foo(1:2)=correlated_estimator(nmc,this%datax(1:nmc))
+      IF (this%flagnopdf) THEN
+         foo(1:2)=uncorrelated_estimator(nmc,this%datax(1:nmc))
+      ELSE
+         foo(1:2)=correlated_estimator(nmc,this%datax(1:nmc))
+      END IF
       IF (this%flagnopdf) foo=foo*this%vol
       average=foo(1) ; error=foo(2)
 
@@ -341,16 +345,18 @@ CONTAINS
       INTEGER(KIND=8) :: i1
 
       this%ridx=1
-      IF (this%flagnopdf) THEN
-         this%pdfx=this%vol
-      ELSE
+      IF (.NOT. this%flagnopdf) THEN
          this%pdfx=this%pdf(this%x)   
       END IF
       CALL this%resetAccRejCounters()
       DO i1 = 1, npoints, 1
-         CALL this%doStepMRT2(flag_acc)
+         IF (this%flagnopdf) THEN
+            CALL this%newX()
+         ELSE
+            CALL this%doStepMRT2(flag_acc)
+         END IF
          IF (flag_obs) THEN
-            IF (flag_acc) THEN
+            IF (flag_acc .OR. this%flagnopdf) THEN
                CALL this%computeNewObservable()
             ELSE
                CALL this%confirmOldObservable()
@@ -412,6 +418,18 @@ CONTAINS
       END DO
       
    END SUBROUTINE findMRT2Step
+
+
+   SUBROUTINE newX(this)
+      IMPLICIT NONE
+      CLASS(MCI) :: this
+      REAL(KIND=8) :: eta(1:this%ndim)
+
+      CALL RANDOM_NUMBER(eta)
+      this%x(1:this%ndim)=this%irange(1,1:this%ndim) + &
+                           (this%irange(2,1:this%ndim)-this%irange(1,1:this%ndim))*eta(1:this%ndim)
+      this%acc=this%acc+1
+   END SUBROUTINE newX
 
 
    SUBROUTINE doStepMRT2(this,flag_acc)
@@ -507,19 +525,6 @@ CONTAINS
       this%ridx=this%ridx+1
       
    END SUBROUTINE confirmOldObservable
-   
-   
-
-
-
-
-
-
-
-
-
-
-
 	
 END MODULE mcintegrator
 
